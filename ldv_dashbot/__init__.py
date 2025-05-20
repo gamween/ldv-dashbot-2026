@@ -192,7 +192,11 @@ class Bot:
                                 if a:
                                     subject.evaluation_link = a.get('href')
                                 else:
-                                    subject.final_grade, subject.max_grade = map(float, i.contents[1].contents[3].select('span.badge')[0].contents[0].strip().split(' / '))
+                                    grade = i.contents[1].contents[3].select('span.badge')[0].contents[0].strip().split(' / ')
+                                    if grade == ['Validé']:
+                                        subject.final_grade, subject.max_grade = 20, 20
+                                    else:
+                                        subject.final_grade, subject.max_grade = map(float, grade)
                                     if len(i.contents[1].contents) > 6:
                                         subject.promo_average = float(i.contents[1].contents[6].contents[0].split(' ')[-1])
                                         subject.coeff = float(i.contents[1].contents[10].contents[0].split(' ')[-1])
