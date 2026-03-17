@@ -1,0 +1,32 @@
+# ESILV Telegram Bot Configuration
+# Copy this file to telegram_config.yaml and fill in your values.
+
+# ── School credentials ────────────────────────────────────────────────────────
+email: your.name@edu.devinci.fr
+password: your_password
+
+# ── Telegram settings ─────────────────────────────────────────────────────────
+# 1. Open Telegram, search for @BotFather
+# 2. Send /newbot, follow the prompts (choose a name and username)
+# 3. BotFather gives you a token like: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+# 4. Paste it below
+telegram_token: "your_telegram_bot_token"
+
+# To get your chat_id:
+# 1. Start your bot on Telegram (send it /start)
+# 2. The bot will reply with your Chat ID
+# 3. Paste it below, then restart the bot
+chat_id: 0
+
+# ── Polling intervals (seconds) ──────────────────────────────────────────────
+poll_presence: 5     # how often to check for open presences
+poll_grades: 300     # how often to check for new grades
+
+# ── Auto-presence ─────────────────────────────────────────────────────────────
+# For remote classes (name contains "CMo" or has Zoom link):
+# the bot waits this many seconds before auto-marking present.
+# Press the button within this time to stay absent.
+auto_presence_timeout: 60
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+log_level: INFO

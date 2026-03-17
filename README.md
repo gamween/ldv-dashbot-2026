@@ -1,44 +1,90 @@
-# LDV DashBot 🎒
-A library to help you automate interactions with LDV's dashboard (such as tracking grades updates)
+# LDV DashBot 2026
 
-**NEW:** we just added support for telegram webhooks.
+A personal Telegram bot for ESILV students that sends real-time notifications for attendance and grades, built on top of the ldv-dashbot library.
 
-## What is the Api ?
-Recently, LDV decided to deploy the app MyDeVinci (com.devinci.mobile / fr.devinci.student).
-This app uses protocols such as OAuth2 for authentication, which is way better than the SAML (via cookies) implementation of the Bot.
-This is why you should consider using the API if the available endpoints are sufficients for your use case (should be more stable than our html parser).
+---
 
-## INSTALL 
-1. First, you have to download this repo
-2. Jump in the repo folder (after extracting it)
-3. Run `pip install -r requirements.txt`
-4. Run `python test_crawler.py` to start with a simple grades exporter !
+## Credits
 
-## ENDPOINTS
-| Action                                    | Bot (crawler)                                                                        | Api (app)                  |
-| ----------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------- |
-| Get authenticated user profile            | bot.user                                                                             | api.get_profile()          |
-| Get user absences                         | bot.get_abs()                                                                        | api.get_absences()         |
-| Get user presences of the day             | bot.get_day_presences() *Doesn't tell you if you are marked as present on a seance.* | api.get_presences()        |
-| Set user as present for a specific seance | bot.set_class_presence(seance_id)                                                    | api.set_present(seance_id) |
-| Get user grades                           | bot.get_grades()                                                                     | -                          |
+This project is a fork of [ldv-dashbot](https://github.com/merlleu/ldv-dashbot), originally created by **Remi Langdorph** and **Antoine Plin**. Their work provides the core library that handles authentication and communication with the ESILV / Leonard de Vinci student portal. All the heavy lifting (login flows, API integration, grade scraping, presence tracking) comes from their project.
 
-## FAQ
+---
 
-### What is cookie_cache
+## What this fork adds
 
-Cookie cache is a way to store session in a file to avoid the need to connect each time you restart the bot.
-This is recommanded if you are still in dev/test phase, as the login process takes a few seconds and this may be detectable if you restart too frequently !
+The original repository provides a Python library and a Discord-oriented watcher system. This fork builds on that foundation by adding a **Telegram bot** that acts as a personal assistant for day-to-day school life.
 
+### Attendance notifications
 
-# LDV Watcher 🎒
-A bot based on ldv-dashbot to get webhooks when grades or presences are updated.
-At the moment, we only support discord webhooks on as hooks, but we may later allow any http request.
+When a professor opens the attendance roll call for a class, the bot sends you a Telegram message immediately. You know the moment it opens, without having to keep checking the app.
 
-## INSTALL USING DOCKER
-1. Run `git clone https://github.com/merlleu/ldv-dashbot && cd ldv-dashbot` to clone this repo.
-2. Build the image using `docker build -t ldv-watcher .`
-2. Create a data folder for persistance: `mkdir ./data`
-4. Rename `config.example.yaml` to `./data/config.yaml` and edit its content.
-5. Run using `docker run -d -v ${PWD}/data:/app/data -v ${PWD}/data/config.yaml:/app/config.yaml --name ldv-watcher ldv-watcher`
-6. You can now check everything is working by reading logs using `docker logs -f ldv-watcher`
+### Auto-presence for remote classes
+
+For online classes (identified by the course name or the presence of a Zoom link), the bot can automatically mark you as present after a short delay. If you want to stay absent for a particular session, you simply press a button in the chat to cancel the auto-mark before it happens.
+
+### Grade notifications
+
+The bot regularly checks for new grades. When a new grade appears, it sends you a detailed notification with the subject, exam name, your grade, and the class average.
+
+### Room information
+
+When available, the bot includes the room or location of the class in its notifications, pulled from the school calendar feed.
+
+---
+
+## Setup
+
+### Requirements
+
+- Python 3.10 or later
+- A Telegram bot token (from [@BotFather](https://t.me/BotFather))
+- Your ESILV portal credentials
+
+### Installation
+
+1. Clone this repository.
+
+2. Install the dependencies:
+   ```
+   pip install -r telegram_requirements.txt
+   ```
+
+3. Copy the example configuration and fill in your credentials:
+   ```
+   cp telegram_config.example.yaml telegram_config.yaml
+   ```
+
+4. Edit `telegram_config.yaml` with your email, password, Telegram token, and chat ID. Instructions for obtaining each value are included in the file.
+
+5. Start the bot:
+   ```
+   python telegram_bot.py
+   ```
+
+The bot will confirm it is running by sending you a message on Telegram.
+
+### Bot commands
+
+| Command             | Description                            |
+|---------------------|----------------------------------------|
+| `/start`            | Display help and available commands    |
+| `/status`           | Show current bot state and active class|
+| `/mockattendance`   | Preview what an attendance alert looks like |
+| `/mockgrade`        | Preview what a grade notification looks like |
+
+---
+
+## How it works
+
+The bot relies on two authentication methods provided by the original ldv-dashbot library:
+
+- **OAuth2 API** (MyDeVinci app) -- used for checking presences, marking attendance, and fetching profile and calendar data.
+- **Web scraper** (ADFS/SAML login) -- used for retrieving grades, which are only available through the student portal HTML pages.
+
+Both run as background polling loops. The bot checks for open presences every few seconds and for new grades every few minutes (intervals are configurable). Notifications are sent to your Telegram chat as soon as a change is detected.
+
+---
+
+## Original project
+
+For details on the underlying library, the watcher system, or the Discord webhook integration, refer to the original repository: [github.com/merlleu/ldv-dashbot](https://github.com/merlleu/ldv-dashbot).

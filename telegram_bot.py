@@ -7,12 +7,14 @@ ESILV Telegram Bot
 """
 
 import asyncio
+import fcntl
 import json
 import logging
 import os
 import sys
 from html import escape as html_escape
 
+import requests
 from yaml import load, Loader
 
 import ldv_dashbot
@@ -45,6 +47,7 @@ TIMEOUT = cfg.get("auto_presence_timeout", 60)
 
 api: ldv_dashbot.Api = None
 scraper: ldv_dashbot.Bot = None
+calendar: ldv_dashbot.ICSCalendar = None
 
 known_presences: dict = {}       # seance_id -> presence dict from API
 pending_tasks: dict = {}         # seance_id -> asyncio.Task (auto-present timer)
@@ -63,11 +66,36 @@ def is_remote(p: dict) -> bool:
     return "CMo" in p.get("nom", "")
 
 
-def _get_current_subject() -> str:
-    """Return the name of the current subject from known presences, or None."""
-    for p in known_presences.values():
-        return p.get("nom", "?")
+def _get_room(p: dict) -> str:
+    """Look up the room/location from the ICS calendar for a given presence."""
+    if calendar is None:
+        return None
+    try:
+        date = p["date"].split("-")
+        start = p["horaire"].split(" ")[0].split(":")
+        ts = "".join(date) + "T" + "".join(start)
+        for ev in calendar.data.get("VEVENT", []):
+            if ev.get("DTSTART") == ts:
+                return ev.get("LOCATION")
+    except Exception:
+        log.debug("Could not look up room for %s", p.get("nom"))
     return None
+
+
+def _refresh_calendar():
+    """Fetch and parse the ICS calendar feed."""
+    global calendar
+    try:
+        profile = api.get_profile()
+        token = profile.get("ical_token")
+        if not token:
+            log.warning("No ical_token in profile, room info unavailable")
+            return
+        url = ldv_dashbot.API_STUDENT_ICAL.format(token)
+        calendar = ldv_dashbot.ICSCalendar(requests.get(url).text)
+        log.info("ICS calendar loaded (%d events)", len(calendar.data.get("VEVENT", [])))
+    except Exception:
+        log.exception("Failed to load ICS calendar")
 
 
 # ── Presence Polling ──────────────────────────────────────────────────────────
@@ -82,16 +110,29 @@ async def presence_loop(app: Application):
     )
     log.info("API ready. Polling presences every %ds...", cfg.get("poll_presence", 10))
 
+    # Load ICS calendar for room info
+    await loop.run_in_executor(None, _refresh_calendar)
+
     # Send startup message
     presences = await loop.run_in_executor(None, api.get_presences)
     current_subject = None
+    current_room = None
     for p in presences:
         if p.get("etat_ouverture") and p["etat_ouverture"] not in ("ferme", "fermé"):
             current_subject = p.get("nom")
+            current_room = _get_room(p)
             break
 
+    # Seed known_presences so the first poll doesn't re-notify
+    for p in presences:
+        if p.get("etat_ouverture") and p["etat_ouverture"] not in ("ferme", "fermé"):
+            known_presences[p["seance_id"]] = p
+
     if current_subject:
-        text = f"Bot en marche, tu es actuellement en {h(current_subject)}."
+        text = f"Bot en marche, tu es actuellement en {h(current_subject)}"
+        if current_room:
+            text += f" (salle {h(current_room)})"
+        text += "."
     else:
         text = "Bot en marche, aucun cours en ce moment."
     await app.bot.send_message(chat_id=cfg["chat_id"], text=text, parse_mode="HTML")
@@ -107,6 +148,8 @@ async def presence_loop(app: Application):
                 is_open = p.get("etat_ouverture") and p["etat_ouverture"] not in ("ferme", "fermé")
 
                 if is_open and sid not in known_presences:
+                    # Refresh calendar on new presence for room lookup
+                    await loop.run_in_executor(None, _refresh_calendar)
                     known_presences[sid] = p
                     await _notify_presence(app, p)
                 elif not is_open:
@@ -127,12 +170,15 @@ async def _notify_presence(app: Application, p: dict):
     """Send a Telegram notification for a newly opened presence."""
     sid = p["seance_id"]
     name = h(p.get("nom", "?"))
+    room = _get_room(p)
     chat_id = cfg["chat_id"]
+
+    room_text = f" (salle {h(room)})" if room else ""
 
     if is_remote(p):
         kb = [[InlineKeyboardButton("Rester absent", callback_data=f"skip:{sid}")]]
 
-        text = f"L'appel pour {name} est ouvert.\nAuto-presence dans {TIMEOUT}s..."
+        text = f"L'appel pour {name}{room_text} est ouvert.\nAuto-presence dans {TIMEOUT}s..."
 
         zoom = p.get("zoom_url", "")
         if zoom:
@@ -149,7 +195,7 @@ async def _notify_presence(app: Application, p: dict):
         log.info("Remote presence opened: %s (seance %d) — timer started", p.get("nom"), sid)
 
     else:
-        text = f"L'appel pour {name} est ouvert."
+        text = f"L'appel pour {name}{room_text} est ouvert."
         await app.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
         log.info("In-person presence opened: %s (seance %d)", p.get("nom"), sid)
 
@@ -323,17 +369,8 @@ async def _send_grade_notification(app: Application, key: tuple, g: dict):
 
 async def cmd_mockattendance(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
     """Send a fake attendance notification for display testing."""
-    fake = {
-        "seance_id": 99999,
-        "nom": "Mathematiques S6",
-        "date": "17/03/2026",
-        "horaire": "10h00 - 12h00",
-        "etat_ouverture": "ouvert",
-        "zoom_url": None,
-    }
-    name = h(fake["nom"])
     await update.message.reply_text(
-        f"L'appel pour {name} est ouvert.",
+        "L'appel pour Mathematiques S6 (salle S305) est ouvert.",
         parse_mode="HTML",
     )
 
@@ -362,32 +399,70 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         "<b>Commandes :</b>\n"
         "/start - Ce message\n"
         "/status - Etat du bot\n"
-        "/mockattendance - Test affichage appel\n"
-        "/mockgrade - Test affichage note\n\n"
-        f"Chat ID : <code>{update.effective_chat.id}</code>",
+        "/mockattendance - Exemple de notification d'appel\n"
+        "/mockgrade - Exemple de notification de note",
         parse_mode="HTML",
     )
+
+
+async def _status_text() -> str:
+    """Build the status message, same format as startup."""
+    loop = asyncio.get_event_loop()
+    try:
+        presences = await loop.run_in_executor(None, api.get_presences)
+        for p in presences:
+            if p.get("etat_ouverture") and p["etat_ouverture"] not in ("ferme", "fermé"):
+                room = _get_room(p)
+                text = f"Bot en marche, tu es actuellement en {h(p.get('nom', '?'))}"
+                if room:
+                    text += f" (salle {h(room)})"
+                text += "."
+                return text
+    except Exception:
+        log.exception("Status check error")
+    return "Bot en marche, aucun cours en ce moment."
 
 
 async def cmd_status(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"<b>Status</b>\n\n"
-        f"Appels suivis : {len(known_presences)}\n"
-        f"Auto-presence en attente : {len(pending_tasks)}",
-        parse_mode="HTML",
-    )
+    text = await _status_text()
+    await update.message.reply_text(text, parse_mode="HTML")
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
 async def post_init(app: Application):
+    # Register commands with Telegram so the command menu stays in sync
+    from telegram import BotCommand
+    await app.bot.set_my_commands([
+        BotCommand("start", "Afficher l'aide"),
+        BotCommand("status", "Etat du bot"),
+        BotCommand("mockattendance", "Exemple de notification d'appel"),
+        BotCommand("mockgrade", "Exemple de notification de note"),
+    ])
     asyncio.create_task(presence_loop(app))
     asyncio.create_task(grades_loop(app))
     log.info("Polling loops started.")
 
 
+_lock_fd = None
+
+def _acquire_lock():
+    """Ensure only one bot instance runs at a time."""
+    global _lock_fd
+    lock_path = os.path.join("data", "telegram_bot.lock")
+    _lock_fd = open(lock_path, "w")
+    try:
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("ERROR: Another bot instance is already running. Kill it first.")
+        sys.exit(1)
+    _lock_fd.write(str(os.getpid()))
+    _lock_fd.flush()
+
+
 def main():
     os.makedirs("data", exist_ok=True)
+    _acquire_lock()
 
     app = (
         Application.builder()
