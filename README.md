@@ -6,7 +6,7 @@ A personal Telegram bot for ESILV students that sends real-time notifications fo
 
 ## Credits
 
-This project is a fork of [ldv-dashbot](https://github.com/merlleu/ldv-dashbot), originally created by **Remi Langdorph** and **Antoine Plin**. Their work provides the core library that handles authentication and communication with the ESILV / Leonard de Vinci student portal. All the heavy lifting (login flows, API integration, grade scraping, presence tracking) comes from their project. Huge thanks to both of them.
+This project is a fork of [ldv-dashbot](https://github.com/merlleu/ldv-dashbot), originally created by [**Remi Langdorph**](https://github.com/merlleu) and [**Antoine Plin**](https://github.com/antpln). Their work provides the core library that handles authentication and communication with the ESILV / Leonard de Vinci student portal. All the heavy lifting (login flows, API integration, grade scraping, presence tracking) comes from their project. Huge thanks to both of them.
 
 ---
 
