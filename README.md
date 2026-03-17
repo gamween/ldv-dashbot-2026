@@ -1,12 +1,12 @@
 # LDV DashBot 2026
 
-A personal Telegram bot for ESILV students that sends real-time notifications for attendance and grades, built on top of the ldv-dashbot library.
+A personal Telegram bot for ESILV students that sends real-time notifications for attendance and grades.
 
 ---
 
 ## Credits
 
-This project is a fork of [ldv-dashbot](https://github.com/merlleu/ldv-dashbot), originally created by **Remi Langdorph** and **Antoine Plin**. Their work provides the core library that handles authentication and communication with the ESILV / Leonard de Vinci student portal. All the heavy lifting (login flows, API integration, grade scraping, presence tracking) comes from their project.
+This project is a fork of [ldv-dashbot](https://github.com/merlleu/ldv-dashbot), originally created by **Remi Langdorph** and **Antoine Plin**. Their work provides the core library that handles authentication and communication with the ESILV / Leonard de Vinci student portal. All the heavy lifting (login flows, API integration, grade scraping, presence tracking) comes from their project. Huge thanks to both of them.
 
 ---
 
@@ -82,9 +82,3 @@ The bot relies on two authentication methods provided by the original ldv-dashbo
 - **Web scraper** (ADFS/SAML login) -- used for retrieving grades, which are only available through the student portal HTML pages.
 
 Both run as background polling loops. The bot checks for open presences every few seconds and for new grades every few minutes (intervals are configurable). Notifications are sent to your Telegram chat as soon as a change is detected.
-
----
-
-## Original project
-
-For details on the underlying library, the watcher system, or the Discord webhook integration, refer to the original repository: [github.com/merlleu/ldv-dashbot](https://github.com/merlleu/ldv-dashbot).
