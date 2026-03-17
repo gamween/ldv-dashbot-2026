@@ -64,6 +64,12 @@ def h(text) -> str:
     return html_escape(str(text))
 
 
+def _is_open(p: dict) -> bool:
+    """Check if a presence's attendance is currently open."""
+    s = p.get("etat_ouverture")
+    return s is not None and s not in ("ferme", "fermé")
+
+
 def is_remote(p: dict, room: str = None) -> bool:
     """Detect remote/visio class: name contains 'CMo' or room is 'ZOOM'."""
     return "CMo" in p.get("nom", "") or (room and room.upper() == "ZOOM")
@@ -117,20 +123,16 @@ async def presence_loop(app: Application):
     # Load ICS calendar for room info
     await loop.run_in_executor(None, _refresh_calendar)
 
-    # Send startup message
+    # Seed known_presences and find current class for startup message
     presences = await loop.run_in_executor(None, api.get_presences)
     current_subject = None
     current_room = None
     for p in presences:
-        if p.get("etat_ouverture") and p["etat_ouverture"] not in ("ferme", "fermé"):
-            current_subject = p.get("nom")
-            current_room = _get_room(p)
-            break
-
-    # Seed known_presences so the first poll doesn't re-notify
-    for p in presences:
-        if p.get("etat_ouverture") and p["etat_ouverture"] not in ("ferme", "fermé"):
+        if _is_open(p):
             known_presences[p["seance_id"]] = p
+            if current_subject is None:
+                current_subject = p.get("nom")
+                current_room = _get_room(p)
 
     if current_subject:
         text = f"Bot en marche, tu es actuellement en {h(current_subject)}"
@@ -153,7 +155,7 @@ async def presence_loop(app: Application):
             for p in presences:
                 sid = p["seance_id"]
                 current_ids.add(sid)
-                is_open = p.get("etat_ouverture") and p["etat_ouverture"] not in ("ferme", "fermé")
+                is_open = _is_open(p)
 
                 if is_open and sid not in known_presences:
                     # Refresh calendar on new presence for room lookup
@@ -188,7 +190,7 @@ async def _notify_presence(app: Application, p: dict):
 
         text = f"L'appel pour {name}{room_text} est ouvert.\nAuto-presence dans {TIMEOUT}s..."
 
-        zoom = p.get("zoom_url", "")
+        zoom = p.get("zoom_url")
         if zoom:
             text += f'\n<a href="{h(zoom)}">Lien Zoom</a>'
 
@@ -222,10 +224,7 @@ async def _auto_present(app: Application, sid: int):
 
         msg = pending_messages.pop(sid, None)
         if msg:
-            await msg.edit_text(
-                f"\u2705 Marked as present",
-                parse_mode="HTML",
-            )
+            await msg.edit_text("\u2705 Marked as present")
 
     except asyncio.CancelledError:
         pass
@@ -253,13 +252,7 @@ async def on_skip_callback(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         task.cancel()
     pending_messages.pop(sid, None)
 
-    p = known_presences.get(sid, {})
-    name = h(p.get("nom", "?"))
-
-    await query.edit_message_text(
-        f"\u274c Stayed absent",
-        parse_mode="HTML",
-    )
+    await query.edit_message_text("\u274c Stayed absent")
     log.info("User chose to stay absent for seance %d", sid)
 
 
@@ -421,7 +414,7 @@ async def _status_text() -> str:
     try:
         presences = await loop.run_in_executor(None, api.get_presences)
         for p in presences:
-            if p.get("etat_ouverture") and p["etat_ouverture"] not in ("ferme", "fermé"):
+            if _is_open(p):
                 room = _get_room(p)
                 text = f"Bot en marche, tu es actuellement en {h(p.get('nom', '?'))}"
                 if room:
