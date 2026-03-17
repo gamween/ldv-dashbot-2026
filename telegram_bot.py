@@ -8,6 +8,7 @@ ESILV Telegram Bot
 
 import asyncio
 import fcntl
+import time
 import json
 import logging
 import os
@@ -51,6 +52,8 @@ calendar: ldv_dashbot.ICSCalendar = None
 
 known_presences: dict = {}       # seance_id -> presence dict from API
 pending_tasks: dict = {}         # seance_id -> asyncio.Task (auto-present timer)
+last_calendar_refresh: float = 0 # timestamp of last ICS calendar refresh
+CALENDAR_REFRESH_INTERVAL = 300  # refresh calendar every 5 minutes
 pending_messages: dict = {}      # seance_id -> telegram Message object
 
 
@@ -61,9 +64,9 @@ def h(text) -> str:
     return html_escape(str(text))
 
 
-def is_remote(p: dict) -> bool:
-    """Detect remote/visio class: name contains 'CMo'."""
-    return "CMo" in p.get("nom", "")
+def is_remote(p: dict, room: str = None) -> bool:
+    """Detect remote/visio class: name contains 'CMo' or room is 'ZOOM'."""
+    return "CMo" in p.get("nom", "") or (room and room.upper() == "ZOOM")
 
 
 def _get_room(p: dict) -> str:
@@ -84,7 +87,7 @@ def _get_room(p: dict) -> str:
 
 def _refresh_calendar():
     """Fetch and parse the ICS calendar feed."""
-    global calendar
+    global calendar, last_calendar_refresh
     try:
         profile = api.get_profile()
         token = profile.get("ical_token")
@@ -93,6 +96,7 @@ def _refresh_calendar():
             return
         url = ldv_dashbot.API_STUDENT_ICAL.format(token)
         calendar = ldv_dashbot.ICSCalendar(requests.get(url).text)
+        last_calendar_refresh = time.time()
         log.info("ICS calendar loaded (%d events)", len(calendar.data.get("VEVENT", [])))
     except Exception:
         log.exception("Failed to load ICS calendar")
@@ -139,6 +143,10 @@ async def presence_loop(app: Application):
 
     while True:
         try:
+            # Periodic calendar refresh every 5 minutes
+            if time.time() - last_calendar_refresh >= CALENDAR_REFRESH_INTERVAL:
+                await loop.run_in_executor(None, _refresh_calendar)
+
             presences = await loop.run_in_executor(None, api.get_presences)
 
             current_ids = set()
@@ -175,8 +183,8 @@ async def _notify_presence(app: Application, p: dict):
 
     room_text = f" (salle {h(room)})" if room else ""
 
-    if is_remote(p):
-        kb = [[InlineKeyboardButton("Rester absent", callback_data=f"skip:{sid}")]]
+    if is_remote(p, room):
+        kb = [[InlineKeyboardButton("\U0001f534 Absent", callback_data=f"skip:{sid}")]]
 
         text = f"L'appel pour {name}{room_text} est ouvert.\nAuto-presence dans {TIMEOUT}s..."
 
@@ -215,7 +223,7 @@ async def _auto_present(app: Application, sid: int):
         msg = pending_messages.pop(sid, None)
         if msg:
             await msg.edit_text(
-                f"Marque present pour {name}.",
+                f"\u2705 Marked as present",
                 parse_mode="HTML",
             )
 
@@ -249,7 +257,7 @@ async def on_skip_callback(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
     name = h(p.get("nom", "?"))
 
     await query.edit_message_text(
-        f"Reste absent pour {name}.",
+        f"\u274c Stayed absent",
         parse_mode="HTML",
     )
     log.info("User chose to stay absent for seance %d", sid)
@@ -390,12 +398,14 @@ async def cmd_mockgrade(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
 # ── Bot Commands ──────────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
+    status = await _status_text()
     await update.message.reply_text(
         "<b>ESILV Telegram Bot</b>\n\n"
-        "Notifications :\n"
+        "<b>Notifications :</b>\n"
         "- Appels de presence ouverts\n"
         "- Auto-presence pour les cours en visio\n"
         "- Nouvelles notes\n\n"
+        f"{status}\n\n"
         "<b>Commandes :</b>\n"
         "/start - Ce message\n"
         "/status - Etat du bot\n"
