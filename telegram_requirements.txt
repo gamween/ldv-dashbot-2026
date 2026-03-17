@@ -1,0 +1,4 @@
+bs4
+requests
+PyYAML
+python-telegram-bot>=20.0
